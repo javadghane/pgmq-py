@@ -1,11 +1,23 @@
 """REST API for interacting with PGMQ queues."""
+
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+try:
+    from fastapi import FastAPI, HTTPException, Request
+    from pydantic import BaseModel, Field
+
+    FASTAPI_AVAILABLE = True
+except ImportError:
+    FASTAPI_AVAILABLE = False
+    # Create placeholder classes for type checking
+    FastAPI = None  # type: ignore
+    HTTPException = None  # type: ignore
+    Request = None  # type: ignore
+    BaseModel = object  # type: ignore
+    Field = None  # type: ignore
 
 from pgmq.messages import Message, QueueMetrics
 from pgmq.queue import PGMQueue
@@ -14,7 +26,9 @@ from pgmq.queue import PGMQueue
 class SendMessagePayload(BaseModel):
     """Payload for sending a single message."""
 
-    message: Dict[str, Any] = Field(..., description="Arbitrary JSON payload to enqueue")
+    message: Dict[str, Any] = Field(
+        ..., description="Arbitrary JSON payload to enqueue"
+    )
     delay: Optional[int] = Field(
         default=None,
         ge=0,
@@ -62,13 +76,17 @@ class ReadMessagesPayload(BaseModel):
 class DeleteBatchPayload(BaseModel):
     """Payload for deleting multiple messages."""
 
-    msg_ids: List[int] = Field(..., description="List of message ids to delete from the queue.")
+    msg_ids: List[int] = Field(
+        ..., description="List of message ids to delete from the queue."
+    )
 
 
 class ArchiveBatchPayload(BaseModel):
     """Payload for archiving multiple messages."""
 
-    msg_ids: List[int] = Field(..., description="List of message ids to archive from the queue.")
+    msg_ids: List[int] = Field(
+        ..., description="List of message ids to archive from the queue."
+    )
 
 
 def _serialize_message(message: Message) -> Dict[str, Any]:
@@ -98,7 +116,16 @@ def _get_queue(request: Request) -> PGMQueue:
 
 
 def create_app(queue: Optional[PGMQueue] = None) -> FastAPI:
-    """Create a FastAPI application configured to interact with a PGMQ queue."""
+    """Create a FastAPI application configured to interact with a PGMQ queue.
+
+    Raises:
+        ImportError: If FastAPI is not installed. Install with: pip install pgmq[api]
+    """
+    if not FASTAPI_AVAILABLE:
+        raise ImportError(
+            "FastAPI is required to use the API functionality. "
+            "Install it with: pip install 'pgmq[api]' or pip install fastapi uvicorn"
+        )
 
     app = FastAPI(
         title="PGMQ API",
@@ -122,12 +149,16 @@ def create_app(queue: Optional[PGMQueue] = None) -> FastAPI:
     ) -> Dict[str, int]:
         queue = _get_queue(request)
         try:
-            msg_id = queue.send(queue_name, payload.message, delay=payload.delay or 0, tz=payload.tz)
+            msg_id = queue.send(
+                queue_name, payload.message, delay=payload.delay or 0, tz=payload.tz
+            )
         except Exception as exc:  # pragma: no cover - unexpected errors
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"msg_id": msg_id}
 
-    @app.post("/queues/{queue_name}/messages/batch", summary="Enqueue a batch of messages")
+    @app.post(
+        "/queues/{queue_name}/messages/batch", summary="Enqueue a batch of messages"
+    )
     def send_batch(
         queue_name: str, payload: SendBatchPayload, request: Request
     ) -> Dict[str, List[int]]:
@@ -160,7 +191,11 @@ def create_app(queue: Optional[PGMQueue] = None) -> FastAPI:
         except Exception as exc:  # pragma: no cover - unexpected errors
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        serialized = [] if not messages else [_serialize_message(message) for message in messages]
+        serialized = (
+            []
+            if not messages
+            else [_serialize_message(message) for message in messages]
+        )
         return {"messages": serialized}
 
     @app.post(
@@ -181,7 +216,9 @@ def create_app(queue: Optional[PGMQueue] = None) -> FastAPI:
         "/queues/{queue_name}/messages/{msg_id}",
         summary="Delete a single message by id",
     )
-    def delete_message(queue_name: str, msg_id: int, request: Request) -> Dict[str, bool]:
+    def delete_message(
+        queue_name: str, msg_id: int, request: Request
+    ) -> Dict[str, bool]:
         queue = _get_queue(request)
         try:
             deleted = queue.delete(queue_name, msg_id)
